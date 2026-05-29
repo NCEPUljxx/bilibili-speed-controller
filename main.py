@@ -365,12 +365,11 @@ class BilibiliSpeedApp:
         self.status_label.config(text=text, foreground=color)
 
     def _periodic_check(self):
-        running = is_bilibili_running()
         port_open = is_debug_port_open()
 
-        if running and port_open:
+        if port_open:
             self.sub_label.config(text="B站运行中 · 调试端口已开启", foreground="green")
-        elif running:
+        elif is_bilibili_running():
             self.sub_label.config(text="B站运行中 · 调试端口未开启", foreground="orange")
         else:
             self.sub_label.config(text="B站未运行", foreground="gray")
