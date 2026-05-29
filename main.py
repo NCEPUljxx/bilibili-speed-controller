@@ -7,7 +7,7 @@ from bilibili_manager import DEFAULT_DEBUG_PORT, is_bilibili_running, is_debug_p
 from cdp_controller import CDPController
 from asar_patcher import find_bilibili_install, is_asr_injected, has_backup, patch_asar, restore_asar
 
-SPEEDS = [1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+SPEEDS = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
 
 
 class BilibiliSpeedApp:
@@ -33,7 +33,7 @@ class BilibiliSpeedApp:
 
     def _center_window(self):
         self.root.update_idletasks()
-        w, h = 290, 340
+        w, h = 290, 390
         x = (self.root.winfo_screenwidth() - w) // 2
         y = (self.root.winfo_screenheight() - h) // 2
         self.root.geometry(f"{w}x{h}+{x}+{y}")
@@ -61,21 +61,37 @@ class BilibiliSpeedApp:
         self.speed_buttons: dict[float, tk.Button] = {}
         for idx, speed in enumerate(SPEEDS):
             row, col = idx // 3, idx % 3
-            is_last = idx == len(SPEEDS) - 1
             text = f"{speed:.1f}x" if speed != int(speed) else f"{int(speed)}x"
             btn = tk.Button(
                 bf, text=text, font=("Microsoft YaHei UI", 13, "bold"),
                 width=5, relief=tk.RAISED,
                 command=lambda s=speed: self._on_speed_click(s),
             )
-            if is_last and len(SPEEDS) % 3 == 1:
-                btn.grid(row=row, column=0, columnspan=3, sticky="ew", pady=3)
-            else:
-                btn.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            btn.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
             self.speed_buttons[speed] = btn
 
         for c in range(3):
             bf.columnconfigure(c, weight=1)
+
+        # -- Custom speed entry --
+        cf = ttk.Frame(self.root, padding=(10, 0, 10, 8))
+        cf.pack(fill=tk.X)
+        cf.columnconfigure(0, weight=1)
+
+        self.custom_var = tk.StringVar()
+        vcmd = (self.root.register(self._validate_custom), "%P")
+        self.custom_entry = ttk.Entry(
+            cf, textvariable=self.custom_var, font=("Microsoft YaHei UI", 11),
+            justify=tk.CENTER, validate="key", validatecommand=vcmd,
+        )
+        self.custom_entry.grid(row=0, column=0, padx=0, pady=0, sticky="ew")
+        self.custom_entry.insert(0, "")
+        self.custom_entry.bind("<Return>", lambda e: self._on_custom_speed())
+
+        self.custom_btn = ttk.Button(
+            cf, text="自定义", command=self._on_custom_speed, width=8,
+        )
+        self.custom_btn.grid(row=0, column=1, padx=(3, 0), pady=0)
 
         ttk.Separator(self.root).pack(fill=tk.X, padx=10)
 
@@ -153,6 +169,8 @@ class BilibiliSpeedApp:
         state = tk.NORMAL if self.connected else tk.DISABLED
         for b in self.speed_buttons.values():
             b.config(state=state)
+        self.custom_entry.config(state=tk.NORMAL if self.connected else "readonly")
+        self.custom_btn.config(state=state)
         self._highlight_active_speed()
 
     def _highlight_active_speed(self):
@@ -185,9 +203,55 @@ class BilibiliSpeedApp:
 
     def _on_speed_result(self, count: int, speed: float):
         if count > 0:
-            self._set_status(f"已连接 · 当前 {speed}x", "green")
+            self._set_status(f"已连接 · 当前 {speed:.1f}x", "green")
         else:
             self._set_status("未找到视频 · 打开视频后点刷新", "orange")
+
+    # ------------------------------------------------------------------
+    # Custom speed entry
+    # ------------------------------------------------------------------
+
+    def _validate_custom(self, value: str) -> bool:
+        """Allow only valid decimal input: digits + optional single decimal point + one digit."""
+        if value == "":
+            return True
+        parts = value.split(".")
+        if len(parts) > 2:
+            return False
+        if len(parts) == 2 and len(parts[1]) > 1:
+            return False
+        for p in parts:
+            if p and not p.isdigit():
+                return False
+        return True
+
+    def _on_custom_speed(self):
+        """Apply custom speed from entry field."""
+        if not self.connected:
+            return
+        raw = self.custom_var.get().strip()
+        if not raw:
+            return
+        try:
+            speed = float(raw)
+        except ValueError:
+            self._set_status("请输入有效数字", "red")
+            return
+        if speed < 0.1 or speed > 16.0:
+            self._set_status("速度范围: 0.1 ~ 16.0", "red")
+            return
+        self.current_speed = speed
+        self._highlight_active_speed()
+        self.custom_var.set(f"{speed:.1f}")
+
+        def worker():
+            try:
+                count = self.cdp.set_speed(speed)
+                self.root.after(0, lambda: self._on_speed_result(count, speed))
+            except Exception as e:
+                self.root.after(0, lambda: self._set_status(str(e), "red"))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Connection
