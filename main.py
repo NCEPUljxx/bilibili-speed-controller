@@ -24,9 +24,11 @@ class BilibiliSpeedApp:
         self.connected = False
         self.current_speed = 1.0
         self._bili_install = find_bilibili_install()
+        self._patched = None  # None=unknown, True/False after checked
 
         self._build_ui()
         self._update_button_states()
+        self._check_patch_once()
         self._periodic_check()
 
     def _center_window(self):
@@ -106,6 +108,23 @@ class BilibiliSpeedApp:
 
         self._update_patch_status()
 
+    def _check_patch_once(self):
+        """Check injection status once, then cache result. Never re-extracts asar."""
+        if self._patched is not None:
+            return
+        def worker():
+            try:
+                if self._bili_install and has_backup(self._bili_install):
+                    self._patched = True
+                elif self._bili_install:
+                    self._patched = is_asr_injected(self._bili_install)
+                else:
+                    self._patched = False
+            except Exception:
+                self._patched = False
+            self.root.after(0, self._update_patch_status)
+        threading.Thread(target=worker, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Patch status
     # ------------------------------------------------------------------
@@ -115,7 +134,7 @@ class BilibiliSpeedApp:
             self._patch_label.config(text="未找到B站安装", foreground="gray")
             self.patch_btn.config(state=tk.DISABLED)
             self.restore_btn.config(state=tk.DISABLED)
-        elif is_asr_injected(self._bili_install):
+        elif self._patched:
             self._patch_label.config(text="CDP已注入", foreground="green")
             self.patch_btn.config(state=tk.DISABLED)
             self.restore_btn.config(state=tk.NORMAL if has_backup(self._bili_install) else tk.DISABLED)
@@ -237,6 +256,8 @@ class BilibiliSpeedApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _patch_done(self, ok: bool):
+        if ok:
+            self._patched = True
         self._update_patch_status()
         if ok:
             self._patch_label.config(text="CDP注入成功！请重新打开B站", foreground="green")
@@ -264,6 +285,8 @@ class BilibiliSpeedApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _restore_done(self, ok: bool):
+        if ok:
+            self._patched = False
         self._update_patch_status()
         if ok:
             self._patch_label.config(text="已恢复原版", foreground="green")
@@ -293,7 +316,6 @@ class BilibiliSpeedApp:
             self._update_button_states()
             self._set_status("连接已断开", "red")
 
-        self._update_patch_status()
         self.root.after(3000, self._periodic_check)
 
     def run(self):
